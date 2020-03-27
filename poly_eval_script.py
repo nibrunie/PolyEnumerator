@@ -1,5 +1,10 @@
+import collections
+import random
 
 class Node:
+    def coeff_compatible(self, rhs):
+        return self.sub_poly.coeff_compatible(rhs.sub_poly)
+
     @property
     def offset(self):
         return self.sub_poly.offset
@@ -8,14 +13,25 @@ class Node:
         return self.sub_poly.coeffs
 
 
+
 class Cst(Node):
-    def __init__(coeff_index):
-        self.sub_poly = SubPoly(0, 1 << coeff_index)
-        self.coeff_index = index
+    def __init__(self, coeff_index):
+        super().__init__()
+        self.sub_poly = SubPoly(coeff_index, 1 << coeff_index)
+        self.coeff_index = coeff_index
+
+    def __str__(self):
+        return "a_%d" % self.coeff_index
+
+class Var(Node):
+    arity = 0
+    def __str__(self):
+        return "x"
 
 class Op(Node):
     arity = None
     def __init__(self, sub_poly, *args):
+        super().__init__()
         assert len(args) == self.arity
         self.sub_poly = sub_poly
         self.args = args
@@ -23,22 +39,30 @@ class Op(Node):
 
 class FADD(Op):
     arity = 2
+    def __str__(self):
+        return "FADD({} + {})".format(self.args[0], self.args[1])
 
 class FMUL(Op):
     arity = 2
+    def __str__(self):
+        return "FMUL({} * {})".format(self.args[0], self.args[1])
 
 class FMA(Op):
     arity = 3
+    def __str__(self):
+        return "FMA({} + {} * {})".format(self.args[0], self.args[1], self.args[2])
 
 class FDMA(Op):
     arity = 4
+    def __str__(self):
+        return "FDMA({} * {} + {} * {})".format(self.args[0], self.args[1], self.args[2], self.args[3])
 
 class FDMDA(Op):
     arity = 5
+    def __str__(self):
+        return "FDMDA({} + {} * {} + {} * {})".format(self.args[0], self.args[1], self.args[2], self.args[3], self.args[4])
 
 
-power_map = {}
-op_map
 
 
 class SubPoly:
@@ -61,32 +85,34 @@ class SubPoly:
         return self.offset, self.coeffs
 
 
-def generate_op_map(degree, coeff_mask=None, NUM_RAMDOM_SAMPLE=100):
+def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
     if coeff_mask is None:
         coeff_mask = 2**(degree+1) - 1
     # initializing operation map with polynomial coefficients
-    op_map = set()
+    op_map = []
     level_map = {}
-    for sub_poly in [[SubPoly(offset=index, coeffs=2**index) for index in range(degree+1) if (coeff_mask >> index) % 2 != 0]]:
+    for index in range(degree+1):
+        if (coeff_mask >> index) % 2 == 0:
+            continue
         op = Cst(index)
         level_map[op] = 0
-        op_map.add(Cst)
+        op_map.append(op)
 
     # populating power map
     power_map = {}
-    power_level = collection.defaultdict(lambda : None)
+    power_level = collections.defaultdict(lambda : None)
     power_level[0] = 0
     power_level[1] = 0
     power_level[2] = 1
+    power_map = {0: None, 1: Var(), 2: FMUL(None, Var(), Var())}
     for index in range(degree+1):
-        for m in range(index):
-            if (index // m) * m == index:
-                lhs = m
-                rhs = index // m
-                level = max(power_level[lhs], power_level[rhs]) + 1
-                if power_level[index] is None or power_level[index] > level:
-                    power_level[index] = level
-                    power_map[index] = Mul(lhs, rhs)
+        for m in range(1, index):
+            lhs = m
+            rhs = index - m
+            level = max(power_level[lhs], power_level[rhs]) + 1
+            if power_level[index] is None or power_level[index] > level:
+                power_level[index] = level
+                power_map[index] = FMUL(None, power_map[lhs], power_map[rhs])
 
     # Adding FMA like operation
     for _ in range(NUM_RANDOM_SAMPLE):
@@ -96,14 +122,16 @@ def generate_op_map(degree, coeff_mask=None, NUM_RAMDOM_SAMPLE=100):
             delta = lhs.offset - rhs.offset
             sub_poly = SubPoly(min(lhs.offset, rhs.offset), lhs.coeffs | rhs.coeffs)
             if delta == 0:
+                node_level = max([level_map[lhs], level_map[rhs]]) + 1
                 new_node = FADD(sub_poly, lhs, rhs)
-            elif delta > 0
-                new_node = FMA(sub_poly, rhs, lhs, delta)
+            elif delta > 0:
+                node_level = max([level_map[lhs], level_map[rhs], power_level[delta]]) + 1
+                new_node = FMA(sub_poly, rhs, lhs, power_map[delta])
             else:
-                new_node = FMA(sub_poly, hs, rhs, -delta)
-            op_map.add(new_node)
+                node_level = max([level_map[lhs], level_map[rhs], power_level[-delta]]) + 1
+                new_node = FMA(sub_poly, lhs, rhs, power_map[-delta])
+            op_map.append(new_node)
             # computing level
-            node_level = max(level_map[lhs], level_map[rhs]) + 1
             level_map[new_node] = node_level
 
     # Adding FDMA like operation
@@ -130,7 +158,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RAMDOM_SAMPLE=100):
                     rhs
                 )
                 node_level = max(power_level[lhs_power], level_map[rhs], power_level[rhs_power], level_map[rhs]) + 1 
-                op_map.add(new_node)
+                op_map.append(new_node)
                 level_map[new_node] = node_level
 
     # Adding FDMDA like operation
@@ -146,21 +174,21 @@ def generate_op_map(degree, coeff_mask=None, NUM_RAMDOM_SAMPLE=100):
         op1_power = op1.offset - min_offset
         op2_power = op2.offset - min_offset
         new_node = FDMDA(
-            sub_poly
+            sub_poly,
             op0,
             op1,
             power_map[op1_power],
             op2,
             power_map[op2_power]
         )
-        node_level = max([level_map[op0], level_map[op1], level_map[op2], power_level[op1_power], power_level[op2_power]) + 1
-        op_map.add(new_node)
+        node_level = max([level_map[op0], level_map[op1], level_map[op2], power_level[op1_power], power_level[op2_power]]) + 1
+        op_map.append(new_node)
         level_map[new_node] = node_level
 
     # looking for complete candidate
     candidates = [node for node in op_map if node.coeffs == coeff_mask]
     best_candidate = min(candidates, key=lambda node: level_map[node])
-    print("best_candidate is {} with level {}".format(best_candidate, level_map[best_candidate]))
+    print("best_candidate is {} with level {}".format(str(best_candidate), level_map[best_candidate]))
 
 generate_op_map(3)
 
