@@ -20,6 +20,10 @@ class Cst(Node):
         self.sub_poly = SubPoly(coeff_index, 1 << coeff_index)
         self.coeff_index = coeff_index
 
+    @property
+    def op_count(self):
+        return 0
+
     def __str__(self):
         return "a_%d" % self.coeff_index
 
@@ -28,6 +32,10 @@ class Var(Node):
     def __str__(self):
         return "x"
 
+    @property
+    def op_count(self):
+        return 0
+
 class Op(Node):
     arity = None
     def __init__(self, sub_poly, *args):
@@ -35,6 +43,10 @@ class Op(Node):
         assert len(args) == self.arity
         self.sub_poly = sub_poly
         self.args = args
+
+    @property
+    def op_count(self):
+        return sum(op.op_count for op in self.args) + 1
 
 
 class FADD(Op):
@@ -187,10 +199,10 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
 
     # looking for complete candidate
     candidates = [node for node in op_map if node.coeffs == coeff_mask]
-    best_candidate = min(candidates, key=lambda node: level_map[node])
-    print("best_candidate is {} with level {}".format(str(best_candidate), level_map[best_candidate]))
+    best_candidate = min(candidates, key=lambda node: (level_map[node], node.op_count))
+    print("best_candidate is {} with level {} and {} op(s)".format(str(best_candidate), level_map[best_candidate], best_candidate.op_count))
 
-generate_op_map(3)
+generate_op_map(7, NUM_RANDOM_SAMPLE=100000)
 
 
 
