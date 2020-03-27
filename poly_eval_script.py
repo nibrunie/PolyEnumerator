@@ -126,8 +126,9 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
                 power_level[index] = level
                 power_map[index] = FMUL(None, power_map[lhs], power_map[rhs])
 
+
     # Adding FMA like operation
-    for _ in range(NUM_RANDOM_SAMPLE):
+    def generate_random_fma():
         lhs = random.choice(op_map)
         rhs = random.choice(op_map)
         if lhs.coeff_compatible(rhs):
@@ -147,7 +148,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
             level_map[new_node] = node_level
 
     # Adding FDMA like operation
-    for _ in range(NUM_RANDOM_SAMPLE):
+    def generate_random_fdma():
         lhs = random.choice(op_map)
         rhs = random.choice(op_map)
         if lhs.coeff_compatible(rhs):
@@ -156,7 +157,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
                 # if min offset is zero or negative, no FDMDA is required
                 # (a FMA or Add will work
                 # and would have been catched (randomly) during previous stage
-                continue
+                return
             for offset in range(0, min_offset):
                 # we compute sub_poly so that is offset is offset
                 lhs_power = lhs.offset - offset
@@ -173,18 +174,22 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
                 op_map.append(new_node)
                 level_map[new_node] = node_level
 
+
     # Adding FDMDA like operation
-    for _ in range(NUM_RANDOM_SAMPLE):
+    def generate_random_fdmda():
         op0 = random.choice(op_map)
         op1 = random.choice(op_map)
         op2 = random.choice(op_map)
         if not(op0.coeff_compatible(op1)) or not(op1.coeff_compatible(op2)) or not(op0.coeff_compatible(op2)):
-            continue
+            return
         min_offset = min(op0.offset, op1.offset, op2.offset)
         sub_poly = SubPoly(min_offset, op0.coeffs | op1.coeffs | op2.coeffs)
         op0, op1, op2 = sorted([op0, op1, op2], key=lambda op: op.offset)
         op1_power = op1.offset - min_offset
         op2_power = op2.offset - min_offset
+        if op1_power == 0 or op2_power == 0:
+            # if any power is 0, this is not really a FDMDA
+            return
         new_node = FDMDA(
             sub_poly,
             op0,
@@ -197,12 +202,19 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
         op_map.append(new_node)
         level_map[new_node] = node_level
 
+    for _ in range(NUM_RANDOM_SAMPLE):
+        generate_random_fma()
+        generate_random_fdma()
+        generate_random_fdmda()
+
+    print("len(op_map) is {}".format(len(op_map)))
+
     # looking for complete candidate
     candidates = [node for node in op_map if node.coeffs == coeff_mask]
     best_candidate = min(candidates, key=lambda node: (level_map[node], node.op_count))
     print("best_candidate is {} with level {} and {} op(s)".format(str(best_candidate), level_map[best_candidate], best_candidate.op_count))
 
-generate_op_map(7, NUM_RANDOM_SAMPLE=100000)
+generate_op_map(7, NUM_RANDOM_SAMPLE=10000000)
 
 
 
