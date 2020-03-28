@@ -1,5 +1,7 @@
 import collections
 import random
+import argparse
+import math
 
 class Node:
     def coeff_compatible(self, rhs):
@@ -226,7 +228,24 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
     best_candidate = min(candidates, key=lambda node: (level_map[node], node.op_count(set())))
     print("best_candidate is {} with level {} and {} op(s)".format(str(best_candidate), level_map[best_candidate], best_candidate.op_count(set())))
 
-generate_op_map(7, NUM_RANDOM_SAMPLE=100000)
 
-
-
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Polynomial scheme explorator')
+    parser.add_argument('--num-steps', action='store',
+                        default=100000, type=int,
+                        help='number of random setps')
+    parser.add_argument('--degree', action='store',
+                        default=7, type=int,
+                        help='polynomial degree (exclusive option with mask)')
+    parser.add_argument('--coeff-mask', action='store',
+                        default=None, type=lambda v: int(v, base=2),
+                        help='coefficient mask (exclusive option with degree)')
+    args = parser.parse_args()
+    if not args.coeff_mask is None:
+        coeff_mask = args.coeff_mask
+        degree = int(math.floor(math.log2(coeff_mask)))
+        print("degree: {}".format(degree))
+    else:
+        coeff_mask = None
+        degree = args.degree
+    generate_op_map(degree, coeff_mask=coeff_mask, NUM_RANDOM_SAMPLE=args.num_steps)
