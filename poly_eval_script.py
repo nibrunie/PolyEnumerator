@@ -170,7 +170,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
                     power_map[rhs_power],
                     rhs
                 )
-                node_level = max(power_level[lhs_power], level_map[rhs], power_level[rhs_power], level_map[rhs]) + 1 
+                node_level = max(power_level[lhs_power], level_map[lhs], power_level[rhs_power], level_map[rhs]) + 1 
                 op_map.append(new_node)
                 level_map[new_node] = node_level
 
