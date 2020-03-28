@@ -187,10 +187,28 @@ def generate_brunie_scheme(degree):
             op0_offset, last_term_op0 = terms.pop(0)
             op1_offset, last_term_op1 = terms.pop(0)
             if len(new_terms) == 0:
-                new_node = FMA(None, last_term_op0, power_map[op1_offset - op0_offset], last_term_op1)
+                if op0_offset - op1_offset == 0:
+                    power_index = min(max(power_map.keys()), op0_offset)
+                    if power_index == 0:
+                        new_node = FADD(None, last_term_op0, last_term_op1)
+                        new_offset = op0_offset
+                    else:
+                        new_node = FDMA(None, last_term_op0, power_map[power_index], last_term_op1, power_map[power_index])
+                        new_offset = op0_offset - power_index
+                else:
+                    assert op1_offset > op0_offset
+                    power_index = op1_offset - op0_offset
+                    new_node = FMA(None, last_term_op0, power_map[op1_offset - op0_offset], last_term_op1)
                 new_offset = op0_offset
             else:
                 max_power_index = max(power_map.keys())
+                delta = op1_offset - op0_offset
+                assert delta >= 0
+                assert delta < max_power_index
+                # we attemp to create a pre step earlier to diminish the offset
+                # of the last term
+                last_term_op1 = FMUL(None, power_map[delta], last_term_op1)
+                op1_offset = op1_offset - delta
                 new_offset = max([op0_offset - max_power_index, op1_offset - max_power_index, 0])
                 new_node = FDMA(None, last_term_op0, power_map[op0_offset - new_offset], last_term_op1, power_map[op1_offset - new_offset])
             new_terms.append((new_offset, new_node))
