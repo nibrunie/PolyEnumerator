@@ -24,6 +24,9 @@ class Cst(Node):
 
     def op_count(self, processed_set=None):
         return 0
+    @property
+    def level(self):
+        return 0
 
     def __str__(self):
         return "a_%d" % self.coeff_index
@@ -34,6 +37,9 @@ class Var(Node):
         return "x"
 
     def op_count(self, processed_set=None):
+        return 0
+    @property
+    def level(self):
         return 0
 
 class Op(Node):
@@ -50,6 +56,9 @@ class Op(Node):
             return 0
         processed_set.add(self)
         return sum(op.op_count(processed_set) for op in self.args) + 1
+    @property
+    def level(self):
+        return max(op.level for op in self.args) + 1
 
 
 class FADD(Op):
@@ -100,7 +109,50 @@ class SubPoly:
         return self.offset, self.coeffs
 
 
-def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
+def random_compatible_mask(superset_mask):
+    """ generate a random mask """
+    pass
+
+def generate_estrin_scheme(degree):
+    terms = [Cst(index) for index in range(degree+1)]
+    var = Var()
+    while len(terms) > 1:
+        new_terms = []
+        while len(terms) >= 2:
+            op0 = terms.pop(0)
+            op1 = terms.pop(0)
+            new_node = FMA(None, op0, op1, var)
+            new_terms.append(new_node)
+        if len(terms):
+            # one last terme remaining
+            new_terms.append(terms.pop(0))
+        var = FMUL(None, var, var)
+        terms = new_terms
+    return terms[0]
+
+def generate_horner_scheme(degree):
+    terms = [Cst(index) for index in range(degree+1)]
+    var = Var()
+    op = terms.pop(-1)
+    for term in terms[::-1]:
+        op = FMA(None, term, var, op)
+    return op
+
+def generate_procedural_scheme(coeff_mask=None, offset=0):
+    if coeff_mask is None:
+        coeff_mask = 2**(degree+1) - 1
+
+    min_index = min([index for index in range(degree + 1) if coeff_mask & (2**index)])
+    mask_no_min = coeff_mask ^ (1 << min_index)
+    even_mask = sum([2**index for index in range(0, degree +1 ,2) if coeff_mask & (2**index)])
+    odd_mask = sum([2**index for index in range(1, degree +1 ,2) if coeff_mask & (2**index)])
+
+    # NOTES/TODO: to be finished
+    raise NotImplementedError
+
+
+
+def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100, operators=None):
     if coeff_mask is None:
         coeff_mask = 2**(degree+1) - 1
 
@@ -215,9 +267,16 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
         mask_map[new_node.coeffs].add(new_node)
 
     for _ in range(NUM_RANDOM_SAMPLE):
-        generate_random_fma()
-        generate_random_fdma()
-        generate_random_fdmda()
+        if "fma" in operators:
+            generate_random_fma()
+        if "fdma" in operators:
+            generate_random_fdma()
+        if "fdmda" in operators:
+            generate_random_fdmda()
+
+    if "fdmda" in operators:
+        for _ in range(NUM_RANDOM_SAMPLE):
+            generate_random_fdmda()
 
     print("len(op_map) is {} ({:.2f}% sample(s))".format(len(op_map), len(op_map) / NUM_RANDOM_SAMPLE * 100))
 
@@ -225,8 +284,10 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
     candidates = [node for node in op_map if node.coeffs == coeff_mask]
     also_candidates = list(mask_map[coeff_mask])
     print("# of candidates {}/{}".format(len(candidates), len(also_candidates)))
-    best_candidate = min(candidates, key=lambda node: (level_map[node], node.op_count(set())))
-    print("best_candidate is {} with level {} and {} op(s)".format(str(best_candidate), level_map[best_candidate], best_candidate.op_count(set())))
+    min_depth_scheme = min(candidates, key=lambda node: (level_map[node], node.op_count(set())))
+    min_num_op_scheme = min(candidates, key=lambda node: (node.op_count(set()), level_map[node]))
+    print("min_depth_scheme is {} with level {} and {} op(s)".format(str(min_depth_scheme), level_map[min_depth_scheme], min_depth_scheme.op_count(set())))
+    print("min_num_op_scheme is {} with level {} and {} op(s)".format(str(min_num_op_scheme), level_map[min_num_op_scheme], min_num_op_scheme.op_count(set())))
 
 
 if __name__ == "__main__":
@@ -240,6 +301,9 @@ if __name__ == "__main__":
     parser.add_argument('--coeff-mask', action='store',
                         default=None, type=lambda v: int(v, base=2),
                         help='coefficient mask (exclusive option with degree)')
+    parser.add_argument('--operators', action='store',
+                        default=["fma", "fadd", "fmul", "fdma", "fdmda"], type=lambda v: v.split(","),
+                        help="',' separated list of allowed operators")
     args = parser.parse_args()
     if not args.coeff_mask is None:
         coeff_mask = args.coeff_mask
@@ -248,4 +312,12 @@ if __name__ == "__main__":
     else:
         coeff_mask = None
         degree = args.degree
-    generate_op_map(degree, coeff_mask=coeff_mask, NUM_RANDOM_SAMPLE=args.num_steps)
+    # standard scheme
+    horner_scheme = generate_horner_scheme(degree)
+    print("horner_scheme is {}, level={}, #ops={}".format(str(horner_scheme), horner_scheme.level, horner_scheme.op_count(set())))
+    estrin_scheme = generate_estrin_scheme(degree)
+    print("estrin_scheme is {}, level={}, #ops={}".format(str(estrin_scheme), estrin_scheme.level, estrin_scheme.op_count(set())))
+
+    # random exploration
+    generate_op_map(degree, coeff_mask=coeff_mask, NUM_RANDOM_SAMPLE=args.num_steps, operators=args.operators)
+
