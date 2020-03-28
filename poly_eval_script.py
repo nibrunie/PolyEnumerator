@@ -2,6 +2,8 @@ import collections
 import random
 import argparse
 import math
+import sys
+import itertools
 
 class Node:
     def coeff_compatible(self, rhs):
@@ -31,6 +33,9 @@ class Cst(Node):
     def __str__(self):
         return "a_%d" % self.coeff_index
 
+    def eval(self, var_value, coeff_map):
+        return coeff_map[self.coeff_index]
+
 class Var(Node):
     arity = 0
     def __str__(self):
@@ -41,6 +46,9 @@ class Var(Node):
     @property
     def level(self):
         return 0
+
+    def eval(self, var_value, coeff_map):
+        return var_value
 
 class Op(Node):
     arity = None
@@ -61,30 +69,45 @@ class Op(Node):
         return max(op.level for op in self.args) + 1
 
 
+
 class FADD(Op):
     arity = 2
     def __str__(self):
         return "FADD({} + {})".format(self.args[0], self.args[1])
 
+    def eval(self, var_value, coeff_map):
+        return self.args[0].eval(var_value, coeff_map) + self.args[1].eval(var_value, coeff_map)
+
 class FMUL(Op):
     arity = 2
     def __str__(self):
         return "FMUL({} * {})".format(self.args[0], self.args[1])
+    def eval(self, var_value, coeff_map):
+        return self.args[0].eval(var_value, coeff_map) * self.args[1].eval(var_value, coeff_map)
 
 class FMA(Op):
     arity = 3
     def __str__(self):
         return "FMA({} + {} * {})".format(self.args[0], self.args[1], self.args[2])
+    def eval(self, var_value, coeff_map):
+        eval_ops = [op.eval(var_value, coeff_map) for op in self.args]
+        return eval_ops[0] + eval_ops[1] * eval_ops[2]
 
 class FDMA(Op):
     arity = 4
     def __str__(self):
         return "FDMA({} * {} + {} * {})".format(self.args[0], self.args[1], self.args[2], self.args[3])
+    def eval(self, var_value, coeff_map):
+        eval_ops = [op.eval(var_value, coeff_map) for op in self.args]
+        return eval_ops[0] * eval_ops[1] + eval_ops[2] * eval_ops[3]
 
 class FDMDA(Op):
     arity = 5
     def __str__(self):
         return "FDMDA({} + {} * {} + {} * {})".format(self.args[0], self.args[1], self.args[2], self.args[3], self.args[4])
+    def eval(self, var_value, coeff_map):
+        eval_ops = [op.eval(var_value, coeff_map) for op in self.args]
+        return eval_ops[0] + eval_ops[1] * eval_ops[2] + eval_ops[3] * eval_ops[4]
 
 
 
@@ -129,6 +152,57 @@ def generate_estrin_scheme(degree):
         var = FMUL(None, var, var)
         terms = new_terms
     return terms[0]
+
+def generate_brunie_scheme(degree):
+    # terms is a list of pairs (offset, term)
+    terms = [(index, Cst(index)) for index in range(degree+1)]
+    power_map = {1: Var()}
+    power_map[2] = FMUL(None, power_map[1], power_map[1])
+
+    while len(terms) > 1:
+        new_terms = []
+        while len(terms) >= 3:
+            offset0, op0 = terms.pop(0)
+            offset1, op1 = terms.pop(0)
+            offset2, op2 = terms.pop(0)
+            if not (offset1 - offset0) in power_map or not (offset2 - offset0) in power_map:
+                # power values required for computation are not available just yet
+                # so we delay evaluation by one stage
+                new_terms.append((offset0, op0))
+                new_terms.append((offset1, op1))
+                new_terms.append((offset2, op2))
+            else:
+                new_node = FDMDA(None, op0, power_map[offset1 - offset0], op1, power_map[offset2 - offset0], op2)
+                new_terms.append((offset0, new_node))
+        if len(terms) == 1:
+            # one last term remaining
+            last_offset, last_term = terms.pop(0)
+            # we look for max power available
+            max_power_index = min(max(power_map.keys()), last_offset)
+            max_power = power_map[max_power_index]
+            new_node = FMUL(None, last_term, max_power)
+            new_terms.append((last_offset - max_power_index, new_node))
+        elif len(terms) == 2:
+            # two last terms remaining
+            op0_offset, last_term_op0 = terms.pop(0)
+            op1_offset, last_term_op1 = terms.pop(0)
+            if len(new_terms) == 0:
+                new_node = FMA(None, last_term_op0, power_map[op1_offset - op0_offset], last_term_op1)
+                new_offset = op0_offset
+            else:
+                max_power_index = max(power_map.keys())
+                new_offset = max([op0_offset - max_power_index, op1_offset - max_power_index, 0])
+                new_node = FDMA(None, last_term_op0, power_map[op0_offset - new_offset], last_term_op1, power_map[op1_offset - new_offset])
+            new_terms.append((new_offset, new_node))
+        # adding new powers computed at that stage
+        old_indexes = list(power_map.keys())
+        for lindex, rindex in itertools.product(old_indexes, old_indexes):
+            new_index = lindex + rindex
+            if not new_index in power_map:
+                power_map[new_index] = FMUL(None, power_map[lindex], power_map[rindex])
+
+        terms = new_terms
+    return terms[0][1]
 
 def generate_horner_scheme(degree):
     terms = [Cst(index) for index in range(degree+1)]
@@ -314,10 +388,22 @@ if __name__ == "__main__":
         degree = args.degree
     # standard scheme
     horner_scheme = generate_horner_scheme(degree)
-    print("horner_scheme is {}, level={}, #ops={}".format(str(horner_scheme), horner_scheme.level, horner_scheme.op_count(set())))
+    print("horner_scheme is {}:\n  level={}, #ops={}".format(str(horner_scheme), horner_scheme.level, horner_scheme.op_count(set())))
     estrin_scheme = generate_estrin_scheme(degree)
-    print("estrin_scheme is {}, level={}, #ops={}".format(str(estrin_scheme), estrin_scheme.level, estrin_scheme.op_count(set())))
+    print("estrin_scheme is {}:\n  level={}, #ops={}".format(str(estrin_scheme), estrin_scheme.level, estrin_scheme.op_count(set())))
+    # brunie scheme
+    brunie_scheme = generate_brunie_scheme(degree)
+    print("brunie_scheme is {}:\n  level={}, #ops={}".format(str(brunie_scheme), brunie_scheme.level, brunie_scheme.op_count(set())))
 
+    coeff_map = [random.random() for _ in range(degree+1)]
+    for test_id in range(10):
+        var_value = random.random()
+        horner_value = horner_scheme.eval(var_value, coeff_map)
+        estrin_value = estrin_scheme.eval(var_value, coeff_map)
+        brunie_value = brunie_scheme.eval(var_value, coeff_map)
+        print("values: {}/{}/{}".format(horner_value, estrin_value, brunie_value))
+
+    sys.exit(0)
     # random exploration
     generate_op_map(degree, coeff_mask=coeff_mask, NUM_RANDOM_SAMPLE=args.num_steps, operators=args.operators)
 
