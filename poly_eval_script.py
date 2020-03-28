@@ -101,9 +101,15 @@ class SubPoly:
 def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
     if coeff_mask is None:
         coeff_mask = 2**(degree+1) - 1
-    # initializing operation map with polynomial coefficients
+
+    # list of nodes
     op_map = []
+    # map node -> level
     level_map = {}
+    # map coeffs subset -> node set
+    mask_map = collections.defaultdict(set)
+
+    # initializing operation map with polynomial coefficients
     for index in range(degree+1):
         if (coeff_mask >> index) % 2 == 0:
             continue
@@ -147,6 +153,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
             op_map.append(new_node)
             # computing level
             level_map[new_node] = node_level
+            mask_map[new_node.coeffs].add(new_node)
 
     # Adding FDMA like operation
     def generate_random_fdma():
@@ -174,6 +181,7 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
                 node_level = max(power_level[lhs_power], level_map[lhs], power_level[rhs_power], level_map[rhs]) + 1 
                 op_map.append(new_node)
                 level_map[new_node] = node_level
+                mask_map[new_node.coeffs].add(new_node)
 
 
     # Adding FDMDA like operation
@@ -202,20 +210,23 @@ def generate_op_map(degree, coeff_mask=None, NUM_RANDOM_SAMPLE=100):
         node_level = max([level_map[op0], level_map[op1], level_map[op2], power_level[op1_power], power_level[op2_power]]) + 1
         op_map.append(new_node)
         level_map[new_node] = node_level
+        mask_map[new_node.coeffs].add(new_node)
 
     for _ in range(NUM_RANDOM_SAMPLE):
         generate_random_fma()
         generate_random_fdma()
         generate_random_fdmda()
 
-    print("len(op_map) is {}".format(len(op_map)))
+    print("len(op_map) is {} ({:.2f}% sample(s))".format(len(op_map), len(op_map) / NUM_RANDOM_SAMPLE * 100))
 
     # looking for complete candidate
     candidates = [node for node in op_map if node.coeffs == coeff_mask]
+    also_candidates = list(mask_map[coeff_mask])
+    print("# of candidates {}/{}".format(len(candidates), len(also_candidates)))
     best_candidate = min(candidates, key=lambda node: (level_map[node], node.op_count(set())))
     print("best_candidate is {} with level {} and {} op(s)".format(str(best_candidate), level_map[best_candidate], best_candidate.op_count(set())))
 
-generate_op_map(7, NUM_RANDOM_SAMPLE=10000000)
+generate_op_map(7, NUM_RANDOM_SAMPLE=100000)
 
 
 
